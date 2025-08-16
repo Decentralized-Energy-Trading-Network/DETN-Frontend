@@ -7,6 +7,8 @@ import Dashboard from "../Pages/Dashboard";
 import EnergyProductionDashboard from "../Pages/EnergyProduction";
 import SolarGeospatialAdmin from "../Pages/SolarGeospatial";
 import UserManagement from "../Pages/User";
+import SignupPage from "../Pages/Clients/SignUp";
+import LoginPage from "../Pages/Clients/SignIn";
 
 function Router() {
   const routes = useRoutes([
@@ -34,7 +36,6 @@ function Router() {
           path: "/community/users",
           element: <UserManagement />,
         },
-        
       ],
     },
     {
@@ -44,6 +45,16 @@ function Router() {
     {
       path: "/signup",
       element: <Signup />,
+    },
+    {
+      path: "/clients",
+      children: [
+        { path: "signin", element: <LoginPage /> },
+        {
+          path: "signup",
+          element: <SignupPage />,
+        },
+      ],
     },
   ]);
 
