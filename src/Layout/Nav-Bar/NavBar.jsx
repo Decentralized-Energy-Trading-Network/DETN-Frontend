@@ -214,11 +214,6 @@ const Sidebar = () => {
           icon: <MapIcon />,
           path: "/community/map",
         },
-        {
-          text: "Battery Storage",
-          icon: <BatteryFullIcon />,
-          path: "/community/storage",
-        },
       ],
     },
     {
@@ -226,6 +221,11 @@ const Sidebar = () => {
       icon: <LocalAtmIcon />,
       hasSubMenu: true,
       subMenuItems: [
+        {
+          text: "Overview",
+          icon: <DashboardIcon />,
+          path: "/marketplace/overview",
+        },
         {
           text: "Order Book",
           icon: <FormatListBulletedIcon />,
@@ -241,14 +241,8 @@ const Sidebar = () => {
           icon: <AttachMoneyIcon />,
           path: "/marketplace/pricing",
         },
-        {
-          text: "Disputes",
-          icon: <GavelIcon />,
-          path: "/marketplace/disputes",
-        },
       ],
     },
-    
   ];
 
   // Helper to check if a path is active
@@ -462,6 +456,7 @@ const Sidebar = () => {
       <List>
         <ListItem disablePadding sx={{ display: "block" }}>
           <ListItemButton
+            onClick={() => navigate("/notifications")}
             sx={{
               minHeight: 48,
               justifyContent: open ? "initial" : "center",
@@ -487,6 +482,7 @@ const Sidebar = () => {
         </ListItem>
         <ListItem disablePadding sx={{ display: "block" }}>
           <ListItemButton
+           onClick={() => navigate("/help")}
             sx={{
               minHeight: 48,
               justifyContent: open ? "initial" : "center",
