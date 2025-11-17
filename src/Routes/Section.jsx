@@ -39,10 +39,7 @@ function Router() {
         </Layout>
       ),
       children: [
-        {
-          index: true,
-          element: <Dashboard />,
-        },
+        
         {
           path: "dashboard",
           element: <Dashboard />,
@@ -88,6 +85,11 @@ function Router() {
           element: <HelpCenter />,
         },
       ],
+    },
+    {
+      index: true,
+      element: <LoginPage />,
+
     },
 
     // Client Routes with Client Layout

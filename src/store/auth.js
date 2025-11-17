@@ -4,7 +4,8 @@ const initialState = {
   user: null,
   isAuthenticated: false,
   loading: false,
-  error: null
+  error: null,
+  token: null
 };
 
 const authSlice = createSlice({
@@ -34,7 +35,12 @@ const authSlice = createSlice({
       if (state.user) {
         state.user.energyBalance = action.payload;
       }
-    }
+    },
+    updateTokenBalance: (state, action) => {
+      if (state.user) {
+        state.user.tokenBalance = action.payload;
+      }
+    },
   }
 });
 

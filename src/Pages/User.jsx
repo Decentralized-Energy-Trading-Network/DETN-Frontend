@@ -25,7 +25,8 @@ import {
   FormControl,
   InputLabel,
   Divider,
-  Badge,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import {
   PersonAdd,
@@ -40,16 +41,19 @@ import {
   Factory,
   Refresh,
 } from "@mui/icons-material";
+import clientService from "../services/client.services";
 
 const UserManagement = () => {
   // State for users data
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  // Pagination
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [pagination, setPagination] = useState({
+    page: 0,
+    limit: 10,
+    total: 0,
+    pages: 0
+  });
 
   // Search and filter
   const [searchTerm, setSearchTerm] = useState("");
@@ -61,56 +65,74 @@ const UserManagement = () => {
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
 
-  // New user form
-  const [newUser, setNewUser] = useState({
-    name: "",
-    email: "",
-    role: "member",
-    building: "",
+  // Notification
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: "",
+    severity: "success"
   });
 
-  // Mock data - in a real app, this would come from an API
+  // New user form
+  const [newUser, setNewUser] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    password: "",
+    walletAddress: "",
+    userType: "home",
+    location: "",
+    solarPanel: { size: "medium" }
+  });
+
+  // Edit user form
+  const [editUser, setEditUser] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    userType: "home",
+    status: "active",
+    location: "",
+    solarPanel: { size: "medium" }
+  });
+
+  // Fetch users from API
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      const params = {
+        page: pagination.page + 1,
+        limit: pagination.limit,
+        search: searchTerm,
+        userType: roleFilter === "all" ? "all" : 
+                 roleFilter === "factory_admin" ? "factory" : "home",
+        status: "all"
+      };
+
+      const response = await clientService.getAllUsers(params);
+      if (response.status === "success") {
+        const transformedUsers = clientService.transformUsersForUI(response.data.users);
+        setUsers(transformedUsers);
+        setFilteredUsers(transformedUsers);
+        setPagination(prev => ({
+          ...prev,
+          total: response.data.pagination.total,
+          pages: response.data.pagination.pages
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      showSnackbar("Error fetching users", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial data load
   useEffect(() => {
-    const mockUsers = [
-      {
-        id: 1,
-        name: "John Smith",
-        email: "john.smith@example.com",
-        role: "admin",
-        status: "active",
-        lastActive: "2023-05-15T10:30:00",
-        avatar: "/avatars/1.jpg",
-        building: { id: 1, type: "house", name: "Smith Residence" },
-      },
-      {
-        id: 2,
-        name: "Sarah Johnson",
-        email: "sarah.j@example.com",
-        role: "member",
-        status: "active",
-        lastActive: "2023-05-14T15:45:00",
-        avatar: "/avatars/2.jpg",
-        building: { id: 2, type: "house", name: "Johnson Home" },
-      },
-      {
-        id: 3,
-        name: "Solar Tech Industries",
-        email: "admin@solar-tech.com",
-        role: "factory_admin",
-        status: "active",
-        lastActive: "2023-05-15T09:15:00",
-        avatar: "/avatars/f1.jpg",
-        building: { id: 101, type: "factory", name: "Solar Tech Plant" },
-      },
-      // Add more mock users as needed (20-30 total)
-    ];
+    fetchUsers();
+  }, [pagination.page, pagination.limit]);
 
-    setUsers(mockUsers);
-    setFilteredUsers(mockUsers);
-    setLoading(false);
-  }, []);
-
-  // Filter users based on search and role
+  // Filter users based on search and role (client-side as backup)
   useEffect(() => {
     let result = users;
 
@@ -118,7 +140,8 @@ const UserManagement = () => {
       result = result.filter(
         (user) =>
           user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          user.email.toLowerCase().includes(searchTerm.toLowerCase())
+          user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          user.walletAddress?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -127,45 +150,121 @@ const UserManagement = () => {
     }
 
     setFilteredUsers(result);
-    setPage(0);
+    setPagination(prev => ({ ...prev, page: 0 }));
   }, [searchTerm, roleFilter, users]);
 
   const handleChangePage = (event, newPage) => {
-    setPage(newPage);
+    setPagination(prev => ({ ...prev, page: newPage }));
   };
 
   const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+    const newLimit = parseInt(event.target.value, 10);
+    setPagination(prev => ({ 
+      ...prev, 
+      limit: newLimit,
+      page: 0 
+    }));
   };
 
-  const handleAddUser = () => {
-    // In a real app, this would call an API
-    const newId = Math.max(...users.map((u) => u.id)) + 1;
-    setUsers([
-      ...users,
-      {
-        id: newId,
-        ...newUser,
-        status: "active",
-        lastActive: new Date().toISOString(),
-        avatar: "/avatars/default.jpg",
-      },
-    ]);
-    setOpenAddDialog(false);
-    setNewUser({ name: "", email: "", role: "member", building: "" });
+  const handleAddUser = async () => {
+    try {
+      // Transform UI data to API format
+      const userData = {
+        firstName: newUser.firstName.split(' ')[0],
+        lastName: newUser.firstName.split(' ').slice(1).join(' ') || '',
+        email: newUser.email,
+        password: newUser.password || `temp${Date.now()}`,
+        walletAddress: newUser.walletAddress || `0x${Date.now().toString(16)}`,
+        userType: newUser.userType === "factory_admin" ? "factory" : "home",
+        location: newUser.location,
+        solarPanel: newUser.solarPanel
+      };
+
+      const response = await clientService.createUser(userData);
+      if (response.status === "success") {
+        showSnackbar("User created successfully", "success");
+        setOpenAddDialog(false);
+        setNewUser({
+          firstName: "",
+          lastName: "",
+          email: "",
+          password: "",
+          walletAddress: "",
+          userType: "home",
+          location: "",
+          solarPanel: { size: "medium" }
+        });
+        fetchUsers(); // Refresh the list
+      }
+    } catch (error) {
+      console.error("Error creating user:", error);
+      showSnackbar(error.message || "Error creating user", "error");
+    }
   };
 
-  const handleEditUser = () => {
-    setUsers(
-      users.map((user) => (user.id === selectedUser.id ? selectedUser : user))
-    );
-    setOpenEditDialog(false);
+  const handleEditUser = async () => {
+    try {
+      const userData = {
+        firstName: editUser.firstName,
+        lastName: editUser.lastName,
+        email: editUser.email,
+        userType: editUser.userType === "factory_admin" ? "factory" : "home",
+        status: editUser.status,
+        location: editUser.location,
+        solarPanel: editUser.solarPanel
+      };
+
+      const response = await clientService.updateUser(selectedUser.id, userData);
+      if (response.status === "success") {
+        showSnackbar("User updated successfully", "success");
+        setOpenEditDialog(false);
+        fetchUsers(); // Refresh the list
+      }
+    } catch (error) {
+      console.error("Error updating user:", error);
+      showSnackbar(error.message || "Error updating user", "error");
+    }
   };
 
-  const handleDeleteUser = () => {
-    setUsers(users.filter((user) => user.id !== selectedUser.id));
-    setOpenDeleteDialog(false);
+  const handleDeleteUser = async () => {
+    try {
+      const response = await clientService.deleteUser(selectedUser.id);
+      if (response.status === "success") {
+        showSnackbar("User deleted successfully", "success");
+        setOpenDeleteDialog(false);
+        fetchUsers(); // Refresh the list
+      }
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      showSnackbar(error.message || "Error deleting user", "error");
+    }
+  };
+
+  const handleRefresh = () => {
+    fetchUsers();
+    showSnackbar("Users list refreshed", "info");
+  };
+
+  const showSnackbar = (message, severity) => {
+    setSnackbar({ open: true, message, severity });
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbar(prev => ({ ...prev, open: false }));
+  };
+
+  const openEditDialogWithUser = (user) => {
+    setSelectedUser(user);
+    setEditUser({
+      firstName: user.name.split(' ')[0],
+      lastName: user.name.split(' ').slice(1).join(' ') || '',
+      email: user.email,
+      userType: user.role === "factory_admin" ? "factory" : "home",
+      status: user.status,
+      location: user.location || "",
+      solarPanel: user.solarPanel || { size: "medium" }
+    });
+    setOpenEditDialog(true);
   };
 
   const getRoleIcon = (role) => {
@@ -249,7 +348,7 @@ const UserManagement = () => {
           </Button>
 
           <Tooltip title="Refresh">
-            <IconButton>
+            <IconButton onClick={handleRefresh}>
               <Refresh />
             </IconButton>
           </Tooltip>
@@ -267,31 +366,30 @@ const UserManagement = () => {
                 <TableCell>Building</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Last Active</TableCell>
+                <TableCell>Wallet Address</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center">
+                  <TableCell colSpan={7} align="center">
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : filteredUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center">
+                  <TableCell colSpan={7} align="center">
                     No users found
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredUsers
-                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                  .slice(pagination.page * pagination.limit, pagination.page * pagination.limit + pagination.limit)
                   .map((user) => (
                     <TableRow key={user.id} hover>
                       <TableCell>
-                        <Box
-                          sx={{ display: "flex", alignItems: "center", gap: 2 }}
-                        >
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
                           <Avatar src={user.avatar} alt={user.name} />
                           <Box>
                             <Typography>{user.name}</Typography>
@@ -330,13 +428,15 @@ const UserManagement = () => {
                       <TableCell>
                         {new Date(user.lastActive).toLocaleString()}
                       </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                          {user.walletAddress ? `${user.walletAddress.slice(0, 6)}...${user.walletAddress.slice(-4)}` : 'No wallet'}
+                        </Typography>
+                      </TableCell>
                       <TableCell align="right">
                         <Tooltip title="Edit">
                           <IconButton
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setOpenEditDialog(true);
-                            }}
+                            onClick={() => openEditDialogWithUser(user)}
                           >
                             <Edit fontSize="small" />
                           </IconButton>
@@ -361,55 +461,62 @@ const UserManagement = () => {
         <TablePagination
           rowsPerPageOptions={[5, 10, 25]}
           component="div"
-          count={filteredUsers.length}
-          rowsPerPage={rowsPerPage}
-          page={page}
+          count={pagination.total}
+          rowsPerPage={pagination.limit}
+          page={pagination.page}
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
         />
       </Paper>
 
       {/* Add User Dialog */}
-      <Dialog open={openAddDialog} onClose={() => setOpenAddDialog(false)}>
+      <Dialog open={openAddDialog} onClose={() => setOpenAddDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Add New User</DialogTitle>
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
             <TextField
               label="Full Name"
-              value={newUser.name}
-              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+              value={newUser.firstName}
+              onChange={(e) => setNewUser({ ...newUser, firstName: e.target.value })}
               fullWidth
             />
             <TextField
               label="Email"
               type="email"
               value={newUser.email}
-              onChange={(e) =>
-                setNewUser({ ...newUser, email: e.target.value })
-              }
+              onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              label="Password"
+              type="password"
+              value={newUser.password}
+              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
               fullWidth
             />
             <FormControl fullWidth>
               <InputLabel>Role</InputLabel>
               <Select
-                value={newUser.role}
+                value={newUser.userType}
                 label="Role"
-                onChange={(e) =>
-                  setNewUser({ ...newUser, role: e.target.value })
-                }
+                onChange={(e) => setNewUser({ ...newUser, userType: e.target.value })}
               >
-                <MenuItem value="admin">Administrator</MenuItem>
+                <MenuItem value="home">Member</MenuItem>
                 <MenuItem value="factory_admin">Factory Admin</MenuItem>
-                <MenuItem value="member">Member</MenuItem>
               </Select>
             </FormControl>
             <TextField
-              label="Building (Optional)"
-              value={newUser.building}
-              onChange={(e) =>
-                setNewUser({ ...newUser, building: e.target.value })
-              }
+              label="Location/Building"
+              value={newUser.location}
+              onChange={(e) => setNewUser({ ...newUser, location: e.target.value })}
               fullWidth
+            />
+            <TextField
+              label="Wallet Address (Optional)"
+              value={newUser.walletAddress}
+              onChange={(e) => setNewUser({ ...newUser, walletAddress: e.target.value })}
+              fullWidth
+              placeholder="0x..."
             />
           </Box>
         </DialogContent>
@@ -422,20 +529,13 @@ const UserManagement = () => {
       </Dialog>
 
       {/* Edit User Dialog */}
-      <Dialog open={openEditDialog} onClose={() => setOpenEditDialog(false)}>
+      <Dialog open={openEditDialog} onClose={() => setOpenEditDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Edit User</DialogTitle>
         <DialogContent>
           {selectedUser && (
-            <Box
-              sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}
-            >
-              <Box
-                sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}
-              >
-                <Avatar
-                  src={selectedUser.avatar}
-                  sx={{ width: 56, height: 56 }}
-                />
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
+                <Avatar src={selectedUser.avatar} sx={{ width: 56, height: 56 }} />
                 <Box>
                   <Typography variant="h6">{selectedUser.name}</Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -446,47 +546,53 @@ const UserManagement = () => {
 
               <Divider />
 
+              <TextField
+                label="First Name"
+                value={editUser.firstName}
+                onChange={(e) => setEditUser({ ...editUser, firstName: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                label="Last Name"
+                value={editUser.lastName}
+                onChange={(e) => setEditUser({ ...editUser, lastName: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                label="Email"
+                value={editUser.email}
+                onChange={(e) => setEditUser({ ...editUser, email: e.target.value })}
+                fullWidth
+              />
+
               <FormControl fullWidth>
                 <InputLabel>Role</InputLabel>
                 <Select
-                  value={selectedUser.role}
+                  value={editUser.userType}
                   label="Role"
-                  onChange={(e) =>
-                    setSelectedUser({ ...selectedUser, role: e.target.value })
-                  }
+                  onChange={(e) => setEditUser({ ...editUser, userType: e.target.value })}
                 >
-                  <MenuItem value="admin">Administrator</MenuItem>
+                  <MenuItem value="home">Member</MenuItem>
                   <MenuItem value="factory_admin">Factory Admin</MenuItem>
-                  <MenuItem value="member">Member</MenuItem>
                 </Select>
               </FormControl>
 
               <FormControl fullWidth>
                 <InputLabel>Status</InputLabel>
                 <Select
-                  value={selectedUser.status}
+                  value={editUser.status}
                   label="Status"
-                  onChange={(e) =>
-                    setSelectedUser({ ...selectedUser, status: e.target.value })
-                  }
+                  onChange={(e) => setEditUser({ ...editUser, status: e.target.value })}
                 >
                   <MenuItem value="active">Active</MenuItem>
-                  <MenuItem value="inactive">Inactive</MenuItem>
+                  <MenuItem value="deactive">Inactive</MenuItem>
                 </Select>
               </FormControl>
 
               <TextField
-                label="Building"
-                value={selectedUser.building?.name || ""}
-                onChange={(e) =>
-                  setSelectedUser({
-                    ...selectedUser,
-                    building: {
-                      ...selectedUser.building,
-                      name: e.target.value,
-                    },
-                  })
-                }
+                label="Location/Building"
+                value={editUser.location}
+                onChange={(e) => setEditUser({ ...editUser, location: e.target.value })}
                 fullWidth
               />
             </Box>
@@ -501,10 +607,7 @@ const UserManagement = () => {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog
-        open={openDeleteDialog}
-        onClose={() => setOpenDeleteDialog(false)}
-      >
+      <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
         <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>
           {selectedUser && (
@@ -522,6 +625,18 @@ const UserManagement = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

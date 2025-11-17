@@ -2,28 +2,28 @@ import api from "../api/api.manager";
 
 // realistic per-interval production mapping (kWh per 30 min)
 const PANEL_INTERVAL_PRODUCTION = {
-  small: 0.02,  // 1.5 kW
-  medium: 0.04, // 3 kW
-  large: 0.05,  // 5 kW
+  small: 0.02,
+  medium: 0.04,
+  large: 0.05,
 };
 
 const energyService = {
   async getClientEnergy(clientId, params = {}) {
     try {
       const queryParams = new URLSearchParams();
-      if (params.startDate) queryParams.append('startDate', params.startDate);
-      if (params.endDate) queryParams.append('endDate', params.endDate);
-      if (params.limit) queryParams.append('limit', params.limit);
+      if (params.startDate) queryParams.append("startDate", params.startDate);
+      if (params.endDate) queryParams.append("endDate", params.endDate);
+      if (params.limit) queryParams.append("limit", params.limit);
       const queryString = queryParams.toString();
-      const url = `energy/client/${clientId}${queryString ? `?${queryString}` : ''}`;
+      const url = `energy/client/${clientId}${
+        queryString ? `?${queryString}` : ""
+      }`;
       const response = await api.get(url);
       return response.data;
     } catch (error) {
       throw error.response?.data || error;
     }
   },
-
-  
 
   async addEnergy(data) {
     try {
@@ -84,7 +84,74 @@ const energyService = {
     } catch (error) {
       throw error.response?.data || error;
     }
-  }
+  },
+
+  async getTotalEnergyProduction(period = "today") {
+    try {
+      const response = await api.get(
+        `energy/production/total?period=${period}`
+      );
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  async getEnergyTradeToday() {
+    try {
+      const response = await api.get("energy/trade/today");
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  async getRealTimeEnergyFlow() {
+    try {
+      const response = await api.get("energy/flow/realtime");
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  async getRecentTransactions(limit = 10) {
+    try {
+      const response = await api.get(`orders/transactions-orders/recent?limit=${limit}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  // Get all transactions with pagination
+  async getAllTransactions(params = {}) {
+    try {
+      const response = await api.get("orders/transactions", { params });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  async getLiveProduction() {
+    try {
+      const response = await api.get("energy/dashboard");
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  // Get transaction statistics
+  async getTransactionStats() {
+    try {
+      const response = await api.get("orders/transactions/stats");
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
 };
 
 export default energyService;

@@ -1,6 +1,6 @@
 // Pages/Clients/SellEnergy.jsx
-import React, { useState } from 'react';
-import { useSelector, useDispatch } from 'react-redux'; // Add useDispatch
+import React, { useEffect, useState } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import {
   Box,
   Card,
@@ -15,58 +15,116 @@ import {
   useTheme,
   useMediaQuery,
   Stack,
-  Divider
+  Divider,
+  Tabs,
+  Tab
 } from '@mui/material';
-import { AttachMoney, EnergySavingsLeaf } from '@mui/icons-material';
+import { AttachMoney, EnergySavingsLeaf, BatteryChargingFull, Storefront } from '@mui/icons-material';
 import orderService from '../../services/order.Services';
 import { showToast } from '../../utils/toast';
-import { updateEnergyBalance } from '../../store/auth'; // Import the action
+import { updateEnergyBalance } from '../../store/auth';
+import communityBatteryService from '../../services/communityBatteryService';
 
 const SellEnergy = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const userId = useSelector((state) => state.auth?.user?._id);
   const energyBalance = useSelector((state) => state.auth?.user?.energyBalance || 0);
-  const dispatch = useDispatch(); // Initialize dispatch
+  const dispatch = useDispatch();
 
-  const [formData, setFormData] = useState({
+  const [activeTab, setActiveTab] = useState(0);
+  const [marketPrice, setMarketPrice] = useState(0.12);
+  const [loading, setLoading] = useState(false);
+
+  // Marketplace selling state
+  const [marketplaceForm, setMarketplaceForm] = useState({
     energyAmount: 0,
     pricePerKwh: 0.12,
     totalPrice: 0
   });
-  const [loading, setLoading] = useState(false);
 
-  const handleEnergyChange = (event, newValue) => {
-    const total = newValue * formData.pricePerKwh;
-    setFormData({
-      ...formData,
+  // Community battery selling state
+  const [batteryForm, setBatteryForm] = useState({
+    energyAmount: 0,
+    totalEarnings: 0
+  });
+
+  const [batteryStats, setBatteryStats] = useState({
+    energyPricePerKwh: 0.12,
+    totalStoredKwh: 0,
+    capacity: 1000
+  });
+
+  const fetchMarketPrice = async () => {
+    try {
+      const response = await communityBatteryService.getBatteryStats();
+      const batteryData = response?.data?.battery;
+      const currentPrice = batteryData?.energyPricePerKwh || 0.12;
+      
+      setMarketPrice(currentPrice);
+      setBatteryStats({
+        energyPricePerKwh: currentPrice,
+        totalStoredKwh: batteryData?.totalStoredKwh || 0,
+        capacity: batteryData?.capacity || 1000
+      });
+
+      // Update forms with current market price
+      setMarketplaceForm(prev => ({
+        ...prev,
+        pricePerKwh: currentPrice,
+        totalPrice: prev.energyAmount * currentPrice
+      }));
+
+      setBatteryForm(prev => ({
+        ...prev,
+        totalEarnings: prev.energyAmount * currentPrice
+      }));
+
+    } catch (err) {
+      console.error('Fetch price error', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchMarketPrice();
+  }, []);
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
+  // Marketplace Tab Handlers
+  const handleMarketplaceEnergyChange = (event, newValue) => {
+    const total = newValue * marketplaceForm.pricePerKwh;
+    setMarketplaceForm({
+      ...marketplaceForm,
       energyAmount: newValue,
       totalPrice: total
     });
   };
 
-  const handlePriceChange = (event) => {
+  const handleMarketplacePriceChange = (event) => {
     const price = parseFloat(event.target.value) || 0;
-    const total = formData.energyAmount * price;
-    setFormData({
-      ...formData,
+    const total = marketplaceForm.energyAmount * price;
+    setMarketplaceForm({
+      ...marketplaceForm,
       pricePerKwh: price,
       totalPrice: total
     });
   };
 
-  const handleSubmit = async () => {
+  const handleMarketplaceSubmit = async () => {
     if (!userId) {
       showToast.error('Please sign in to list energy');
       return;
     }
 
-    if (!formData.energyAmount || formData.energyAmount <= 0) {
+    if (!marketplaceForm.energyAmount || marketplaceForm.energyAmount <= 0) {
       showToast.error('Enter a valid energy amount');
       return;
     }
 
-    if (formData.energyAmount > energyBalance) {
+    if (marketplaceForm.energyAmount > energyBalance) {
       showToast.error('Insufficient energy balance');
       return;
     }
@@ -75,23 +133,23 @@ const SellEnergy = () => {
     try {
       const payload = {
         clientId: userId,
-        energyAmount: Number(formData.energyAmount),
-        pricePerUnit: Number(formData.pricePerKwh)
+        energyAmount: Number(marketplaceForm.energyAmount),
+        pricePerUnit: Number(marketplaceForm.pricePerKwh)
       };
       await orderService.createOrder(payload);
       
       // Calculate new energy balance
-      const newEnergyBalance = energyBalance - formData.energyAmount;
+      const newEnergyBalance = energyBalance - marketplaceForm.energyAmount;
       
       // Update Redux state
       dispatch(updateEnergyBalance(newEnergyBalance));
       
-      showToast.success('Sell order created successfully');
+      showToast.success('Sell order created successfully in marketplace!');
       
       // Reset form
-      setFormData({
+      setMarketplaceForm({
         energyAmount: 0,
-        pricePerKwh: formData.pricePerKwh,
+        pricePerKwh: marketPrice,
         totalPrice: 0
       });
     } catch (err) {
@@ -102,115 +160,347 @@ const SellEnergy = () => {
     }
   };
 
+  // Community Battery Tab Handlers
+  const handleBatteryEnergyChange = (event, newValue) => {
+    const totalEarnings = newValue * marketPrice;
+    setBatteryForm({
+      energyAmount: newValue,
+      totalEarnings: totalEarnings
+    });
+  };
+
+  const handleSellToBattery = async () => {
+    if (!userId) {
+      showToast.error('Please sign in to sell energy');
+      return;
+    }
+
+    if (!batteryForm.energyAmount || batteryForm.energyAmount <= 0) {
+      showToast.error('Enter a valid energy amount');
+      return;
+    }
+
+    if (batteryForm.energyAmount > energyBalance) {
+      showToast.error('Insufficient energy balance');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Use the depositEnergy API to sell to community battery
+      const response = await communityBatteryService.depositEnergy(batteryForm.energyAmount);
+      
+      // Calculate new energy balance
+      const newEnergyBalance = energyBalance - batteryForm.energyAmount;
+      
+      // Update Redux state
+      dispatch(updateEnergyBalance(newEnergyBalance));
+      
+      showToast.success(`Successfully sold ${batteryForm.energyAmount} kWh to community battery for $${batteryForm.totalEarnings.toFixed(2)}!`);
+      
+      // Refresh battery stats
+      await fetchMarketPrice();
+      
+      // Reset form
+      setBatteryForm({
+        energyAmount: 0,
+        totalEarnings: 0
+      });
+    } catch (err) {
+      console.error('Sell to battery error', err);
+      showToast.error(err?.message || 'Failed to sell energy to battery');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const batteryUtilization = (batteryStats.totalStoredKwh / batteryStats.capacity) * 100;
+
   return (
     <Box sx={{ p: isMobile ? 2 : 3 }}>
-      <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', mb: 4 }}>
+      <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
         Sell Your Energy
       </Typography>
 
-      <Grid container spacing={3}>
-        {/* Sell Form */}
-        <Grid item xs={12} md={8}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Create Sell Order
-              </Typography>
-              
-              {/* Energy Balance Display */}
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Available Energy Balance: <strong>{energyBalance} kWh</strong>
-              </Alert>
-              
-              <Stack spacing={3}>
-                {/* Energy Amount Slider */}
-                <Box>
-                  <Typography gutterBottom>
-                    Energy Amount: {formData.energyAmount} kWh
-                  </Typography>
-                  <Slider
-                    value={formData.energyAmount}
-                    onChange={handleEnergyChange}
-                    min={0.1}
-                    max={energyBalance}
-                    step={0.1}
-                    valueLabelDisplay="auto"
-                    sx={{ mb: 2 }}
-                  />
-                </Box>
+      <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 3 }}>
+        <Tab icon={<Storefront />} label="Sell in Marketplace" />
+        <Tab icon={<BatteryChargingFull />} label="Sell to Community Battery" />
+      </Tabs>
 
-                {/* Price Input */}
-                <TextField
-                  fullWidth
-                  label="Price per kWh ($)"
-                  type="number"
-                  value={formData.pricePerKwh}
-                  onChange={handlePriceChange}
-                  InputProps={{
-                    startAdornment: <AttachMoney sx={{ mr: 1, color: 'text.secondary' }} />
-                  }}
-                />
+      {/* Current Balance Display */}
+      <Card sx={{ mb: 3, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">
+              Your Current Energy Balance:
+            </Typography>
+            <Typography variant="h5" fontWeight="bold">
+              {energyBalance.toFixed(1)} kWh
+            </Typography>
+          </Box>
+        </CardContent>
+      </Card>
 
-                {/* Total Price Display */}
-                <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="h6">Total Value:</Typography>
-                    <Typography variant="h6" color="primary">
-                      ${formData.totalPrice.toFixed(2)}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      New Balance:
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {(energyBalance - formData.energyAmount).toFixed(1)} kWh
-                    </Typography>
-                  </Box>
-                </Paper>
-
-                {/* Submit Button */}
-                <Button
-                  variant="contained"
-                  size="large"
-                  fullWidth
-                  onClick={handleSubmit}
-                  disabled={loading || formData.energyAmount === 0}
-                  sx={{ py: 1.5 }}
-                >
-                  {loading ? 'Listing...' : 'List Energy for Sale'}
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Market Info */}
-        <Grid item xs={12} md={4}>
-          <Stack spacing={3}>
+      {activeTab === 0 ? (
+        /* Marketplace Selling Tab */
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  Market Tips
+                  Sell in Energy Marketplace
                 </Typography>
-                <Typography variant="body2" color="text.secondary" paragraph>
-                  • Current average sell price: $0.12/kWh
-                </Typography>
-                <Typography variant="body2" color="text.secondary" paragraph>
-                  • Faster sales at or below market average
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  • Transactions are secured on blockchain
-                </Typography>
+                
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  List your energy for other users to purchase. You set the price!
+                </Alert>
+                
+                <Stack spacing={3}>
+                  {/* Energy Amount Slider */}
+                  <Box>
+                    <Typography gutterBottom>
+                      Energy Amount: {marketplaceForm.energyAmount} kWh
+                    </Typography>
+                    <Slider
+                      value={marketplaceForm.energyAmount}
+                      onChange={handleMarketplaceEnergyChange}
+                      min={0.1}
+                      max={energyBalance}
+                      step={0.1}
+                      valueLabelDisplay="auto"
+                      sx={{ mb: 2 }}
+                    />
+                  </Box>
+
+                  {/* Price Input - User sets their own price */}
+                  <TextField
+                    fullWidth
+                    label="Your Price per kWh ($)"
+                    type="number"
+                    value={marketplaceForm.pricePerKwh}
+                    onChange={handleMarketplacePriceChange}
+                    InputProps={{
+                      startAdornment: <AttachMoney sx={{ mr: 1, color: 'text.secondary' }} />
+                    }}
+                    helperText={`Market price: $${marketPrice.toFixed(2)}/kWh`}
+                  />
+
+                  {/* Total Price Display */}
+                  <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="h6">Potential Earnings:</Typography>
+                      <Typography variant="h6" color="primary">
+                        ${marketplaceForm.totalPrice.toFixed(2)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        New Balance:
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {(energyBalance - marketplaceForm.energyAmount).toFixed(1)} kWh
+                      </Typography>
+                    </Box>
+                  </Paper>
+
+                  {/* Submit Button */}
+                  <Button
+                    variant="contained"
+                    size="large"
+                    fullWidth
+                    onClick={handleMarketplaceSubmit}
+                    disabled={loading || marketplaceForm.energyAmount === 0}
+                    sx={{ py: 1.5 }}
+                    startIcon={<Storefront />}
+                  >
+                    {loading ? 'Listing...' : 'List in Marketplace'}
+                  </Button>
+                </Stack>
               </CardContent>
             </Card>
+          </Grid>
 
-            <Alert severity="info">
-              Your energy will be listed in the marketplace for other users to purchase.
-            </Alert>
-          </Stack>
+          {/* Marketplace Info Sidebar */}
+          <Grid item xs={12} md={4}>
+            <Stack spacing={3}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Marketplace Tips
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    • Current market price: ${marketPrice.toFixed(2)}/kWh
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    • Price competitively for faster sales
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    • Buyers can purchase from individual sellers
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    • You receive payment when energy is purchased
+                  </Typography>
+                </CardContent>
+              </Card>
+
+              <Alert severity="warning">
+                Your energy will remain listed until purchased or you cancel the listing.
+              </Alert>
+            </Stack>
+          </Grid>
         </Grid>
-      </Grid>
+      ) : (
+        /* Community Battery Selling Tab */
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Sell to Community Battery
+                </Typography>
+                
+                {/* Battery Status */}
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography>
+                      Battery Level: <strong>{batteryStats.totalStoredKwh.toFixed(1)} kWh space</strong>
+                    </Typography>
+                    <Typography>
+                       Buy Price: <strong>${marketPrice.toFixed(2)}/kWh</strong>
+                    </Typography>
+                  </Box>
+                </Alert>
+                
+                <Stack spacing={3}>
+                  {/* Energy Amount Slider */}
+                  <Box>
+                    <Typography gutterBottom>
+                      Energy Amount: {batteryForm.energyAmount} kWh
+                    </Typography>
+                    <Slider
+                      value={batteryForm.energyAmount}
+                      onChange={handleBatteryEnergyChange}
+                      min={0.1}
+                      max={energyBalance}
+                      step={0.1}
+                      valueLabelDisplay="auto"
+                      sx={{ mb: 2 }}
+                    />
+                  </Box>
+
+                  {/* Fixed Price Display */}
+                  <TextField
+                    fullWidth
+                    label="Battery Buy Price per kWh ($)"
+                    type="number"
+                    value={marketPrice}
+                    disabled
+                    InputProps={{
+                      startAdornment: <AttachMoney sx={{ mr: 1, color: 'text.secondary' }} />
+                    }}
+                    helperText="Fixed price offered by community battery"
+                  />
+
+                  {/* Total Earnings Display */}
+                  <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="h6">Total Earnings:</Typography>
+                      <Typography variant="h6" color="primary">
+                        ${batteryForm.totalEarnings.toFixed(2)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        New Balance:
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {(energyBalance - batteryForm.energyAmount).toFixed(1)} kWh
+                      </Typography>
+                    </Box>
+                  </Paper>
+
+                  {/* Sell Button */}
+                  <Button
+                    variant="contained"
+                    size="large"
+                    fullWidth
+                    onClick={handleSellToBattery}
+                    disabled={loading || batteryForm.energyAmount === 0}
+                    sx={{ py: 1.5 }}
+                    startIcon={<BatteryChargingFull />}
+                    color="secondary"
+                  >
+                    {loading ? 'Selling...' : `Sell to Battery for $${batteryForm.totalEarnings.toFixed(2)}`}
+                  </Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Battery Info Sidebar */}
+          <Grid item xs={12} md={4}>
+            <Stack spacing={3}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Battery Information
+                  </Typography>
+                  <Stack spacing={2}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="body2">Capacity:</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {batteryStats.capacity} kWh
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="body2">Current Storage:</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {batteryStats.totalStoredKwh.toFixed(1)} kWh
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="body2">Utilization:</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {batteryUtilization.toFixed(1)}%
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="body2">Buy Price:</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        ${marketPrice.toFixed(2)}/kWh
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </CardContent>
+              </Card>
+
+              <Alert severity="success">
+                Selling to the community battery provides instant payment and helps support the local energy grid.
+              </Alert>
+
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Benefits
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    • Instant payment at market rate
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    • No waiting for buyers
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    • Support community energy storage
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    • Reliable and guaranteed sale
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Stack>
+          </Grid>
+        </Grid>
+      )}
     </Box>
   );
 };
